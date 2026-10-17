@@ -1,0 +1,18 @@
+{
+  "name": "satellite-watch",
+  "version": "1.0.0",
+  "description": "Satellite Data for Local Problem Solving — An educational platform for Siksha-Hack 2026",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["satellite", "education", "hackathon", "remote-sensing", "ndvi"],
+  "author": "Team Python Kit",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  }
+}
