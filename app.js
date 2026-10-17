@@ -1,156 +1,204 @@
 /* ============================================
-   SATELLITE WATCH — App Logic
+   SATELLITE WATCH — Main Application Logic
    ============================================ */
 
-const $ = id => document.getElementById(id);
+// ----- Tab / view switching -----
+function setupTabs() {
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const views = document.querySelectorAll('.view');
 
-// ---------- Map ----------
-let map;
-let marker;
-
-function initMap() {
-  map = L.map('map').setView([30.9010, 75.8573], 13); // Ludhiana
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'Esri, Maxar, Earthstar Geographics',
-    maxZoom: 19
-  }).addTo(map);
-
-  map.on('click', function(e) {
-    const lat = e.latlng.lat.toFixed(4);
-    const lng = e.latlng.lng.toFixed(4);
-    if (marker) marker.setLatLng(e.latlng);
-    else marker = L.marker(e.latlng).addTo(map);
-    $('locName').textContent = `${lat}, ${lng}`;
-    $('locCoords').textContent = `${lat}, ${lng}`;
-    $('analyzeBtn').disabled = false;
+  tabBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.tab;
+      tabBtns.forEach((b) => b.classList.toggle('active', b === btn));
+      views.forEach((v) => v.classList.toggle('active', v.id === 'view-' + target));
+    });
   });
 }
 
-// ---------- AI Analysis ----------
-async function analyzeLocation() {
-  const coords = $('locCoords').textContent;
-  if (!coords || coords === '—') return;
+// ----- Layer toggle buttons -----
+function setupLayerToggles() {
+  const layerBtns = document.querySelectorAll('.layer-btn');
+  layerBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      btn.classList.toggle('active');
+      const isActive = btn.classList.contains('active');
+      const layerKey = btn.dataset.layer;
 
-  const btn = $('analyzeBtn');
-  btn.disabled = true;
-  btn.textContent = 'Analyzing…';
-  $('aiResult').hidden = true;
-
-  try {
-    const res = await fetch('/api/analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ coordinates: coords })
+      if (window.map && window.map[layerKey]) {
+        if (isActive) {
+          window.map[layerKey].addTo(window.leafletMap);
+        } else {
+          window.leafletMap.removeLayer(window.map[layerKey]);
+        }
+      }
     });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    $('aiBody').innerHTML = formatMarkdown(data.analysis);
-    $('aiResult').hidden = false;
-  } catch (e) {
-    $('aiBody').innerHTML = `<div class="notice error"><span class="ic">⚠️</span><span>${e.message || 'Analysis failed. Please try again.'}</span></div>`;
-    $('aiResult').hidden = false;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🤖 Analyze with AI';
-  }
+  });
 }
 
-// ---------- Markdown formatter ----------
+// ----- Before/After slider -----
+function setupCompareSlider() {
+  const slider = document.getElementById('compareSlider');
+  const afterImg = document.getElementById('afterImage');
+  const beforeImg = document.getElementById('beforeImage');
+
+  if (!slider || !afterImg || !beforeImg) return;
+
+  slider.addEventListener('input', () => {
+    const val = slider.value;
+    afterImg.style.clipPath = `inset(0 ${100 - val}% 0 0)`;
+  });
+}
+
+// ----- Chat / Ask Gemini -----
+function setupChat() {
+  const form = document.getElementById('chatForm');
+  const input = document.getElementById('chatInput');
+  const messages = document.getElementById('chatMessages');
+  const loading = document.getElementById('chatLoading');
+
+  if (!form || !input || !messages) return;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const question = input.value.trim();
+    if (!question) return;
+
+    // Add user message
+    const userMsg = document.createElement('div');
+    userMsg.className = 'chat-message user';
+    userMsg.textContent = question;
+    messages.appendChild(userMsg);
+
+    // Show loading
+    if (loading) loading.style.display = 'flex';
+    input.value = '';
+
+    try {
+      const response = await fetch('/api/explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question,
+          context: window.lastAnalysisResult || '',
+          layer: window.currentLayer || 'ndvi'
+        })
+      });
+
+      const data = await response.json();
+
+      const botMsg = document.createElement('div');
+      botMsg.className = 'chat-message bot';
+      if (data.error) {
+        botMsg.textContent = 'Error: ' + data.error;
+      } else {
+        botMsg.innerHTML = formatMarkdown(data.reply || data.explanation || 'No response');
+      }
+      messages.appendChild(botMsg);
+    } catch (err) {
+      const botMsg = document.createElement('div');
+      botMsg.className = 'chat-message bot';
+      botMsg.textContent = 'Connection error. Please try again.';
+      messages.appendChild(botMsg);
+    } finally {
+      if (loading) loading.style.display = 'none';
+      messages.scrollTop = messages.scrollHeight;
+    }
+  });
+}
+
+// ----- Markdown to HTML formatter -----
 function formatMarkdown(text) {
-  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  return esc(text)
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\n/g, '<br>');
 }
 
-// ---------- Quiz ----------
-const QUIZ = [
-  {
-    q: 'What does NDVI measure?',
-    options: ['Soil moisture', 'Vegetation health', 'Atmospheric pressure', 'Ocean salinity'],
-    answer: 1
-  },
-  {
-    q: 'Which satellite provides free optical imagery at 10m resolution?',
-    options: ['WorldView-3', 'Sentinel-2', 'GeoEye-1', 'IKONOS'],
-    answer: 1
-  },
-  {
-    q: 'What is the spatial resolution of MODIS imagery?',
-    options: ['10 m', '100 m', '250 m', '1 km'],
-    answer: 2
-  },
-  {
-    q: 'Which band combination is best for vegetation analysis?',
-    options: ['RGB', 'NIR-Red-Green', 'SWIR-NIR-Red', 'Thermal'],
-    answer: 1
-  },
-  {
-    q: 'What does a high NDVI value (close to +1) indicate?',
-    options: ['Bare soil', 'Water', 'Dense healthy vegetation', 'Urban area'],
-    answer: 2
+// ----- NDVI Legend -----
+function updateNDVILegend(min, max) {
+  const minLabel = document.getElementById('ndviMin');
+  const maxLabel = document.getElementById('ndviMax');
+  if (minLabel) minLabel.textContent = min.toFixed(2);
+  if (maxLabel) maxLabel.textContent = max.toFixed(2);
+}
+
+// ----- Pixel value display -----
+function setupPixelInspector() {
+  const canvas = document.getElementById('analysisCanvas');
+  const readout = document.getElementById('pixelReadout');
+  if (!canvas || !readout) return;
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor(e.clientX - rect.left);
+    const y = Math.floor(e.clientY - rect.top);
+    readout.textContent = `x:${x} y:${y}`;
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    readout.textContent = 'Hover over image';
+  });
+}
+
+// ----- Export / Download -----
+function setupExport() {
+  const exportBtn = document.getElementById('exportBtn');
+  const exportModal = document.getElementById('exportModal');
+  const exportClose = document.getElementById('exportClose');
+
+  if (exportBtn && exportModal) {
+    exportBtn.addEventListener('click', () => {
+      exportModal.classList.add('open');
+    });
   }
-];
 
-let quizIndex = 0;
-let quizScore = 0;
-let quizAnswered = false;
-
-function renderQuiz() {
-  const item = QUIZ[quizIndex];
-  quizAnswered = false;
-  $('quizQuestion').textContent = item.q;
-  const opts = $('quizOptions');
-  opts.innerHTML = '';
-  item.options.forEach((opt, i) => {
-    const btn = document.createElement('button');
-    btn.className = 'quiz-opt';
-    btn.textContent = opt;
-    btn.addEventListener('click', () => answerQuiz(i));
-    opts.appendChild(btn);
-  });
-  $('quizBar').style.width = `${(quizIndex / QUIZ.length) * 100}%`;
-  $('quizCounter').textContent = `Question ${quizIndex + 1} of ${QUIZ.length}`;
-  $('quizNext').hidden = true;
-}
-
-function answerQuiz(i) {
-  if (quizAnswered) return;
-  quizAnswered = true;
-  const item = QUIZ[quizIndex];
-  const opts = document.querySelectorAll('.quiz-opt');
-  opts.forEach((btn, j) => {
-    btn.disabled = true;
-    if (j === item.answer) btn.classList.add('correct');
-    if (j === i && i !== item.answer) btn.classList.add('wrong');
-  });
-  if (i === item.answer) quizScore++;
-  $('quizBar').style.width = `${((quizIndex + 1) / QUIZ.length) * 100}%`;
-  $('quizNext').hidden = false;
-}
-
-function nextQuiz() {
-  quizIndex++;
-  if (quizIndex >= QUIZ.length) {
-    $('quizCard').hidden = true;
-    $('quizResult').hidden = false;
-    $('quizScore').textContent = quizScore;
-    const pct = Math.round(quizScore / QUIZ.length * 100);
-    $('quizFeedback').textContent = pct >= 80 ? 'Excellent! You know your remote sensing.' : pct >= 60 ? 'Good job! Keep learning.' : 'Keep studying — you\'ll get there!';
-  } else {
-    renderQuiz();
+  if (exportClose && exportModal) {
+    exportClose.addEventListener('click', () => {
+      exportModal.classList.remove('open');
+    });
+    exportModal.addEventListener('click', (e) => {
+      if (e.target === exportModal) exportModal.classList.remove('open');
+    });
   }
 }
 
-// ---------- Wire up ----------
+// ----- Setup everything on load -----
 document.addEventListener('DOMContentLoaded', () => {
-  initMap();
-  $('analyzeBtn').addEventListener('click', analyzeLocation);
-  $('quizRetry').addEventListener('click', () => {
-    quizIndex = 0; quizScore = 0;
-    $('quizResult').hidden = true;
-    $('quizCard').hidden = false;
-    renderQuiz();
-  });
-  $('quizNext').addEventListener('click', nextQuiz);
+  setupTabs();
+  setupLayerToggles();
+  setupCompareSlider();
+  setupChat();
+  setupPixelInspector();
+  setupExport();
 });
+
+// ----- Expose to global scope for Leaflet callbacks -----
+window.showPixelValue = function(lat, lng, value) {
+  const el = document.getElementById('pixelReadout');
+  if (el) {
+    const layer = window.currentLayer || 'ndvi';
+    const label = layer.charAt(0).toUpperCase() + layer.slice(1);
+    el.textContent = `${label}: ${value.toFixed(4)} (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+  }
+};
+
+window.showLoading = function() {
+  const el = document.getElementById('loadingOverlay');
+  if (el) el.style.display = 'flex';
+};
+
+window.hideLoading = function() {
+  const el = document.getElementById('loadingOverlay');
+  if (el) el.style.display = 'none';
+};
+
+window.showError = function(msg) {
+  const el = document.getElementById('errorMessage');
+  if (el) {
+    el.textContent = msg;
+    el.style.display = 'flex';
+    setTimeout(() => { el.style.display = 'none'; }, 5000);
+  }
+};
